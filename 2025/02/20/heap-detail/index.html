@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 7.3.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/all.min.css">
+
+<script id="hexo-configurations">
+    var NexT = window.NexT || {};
+    var CONFIG = {"hostname":"example.com","root":"/","scheme":"Muse","version":"7.8.0","exturl":false,"sidebar":{"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},"copycode":{"enable":false,"show_result":false,"style":null},"back2top":{"enable":true,"sidebar":false,"scrollpercent":false},"bookmark":{"enable":false,"color":"#222","save":"auto"},"fancybox":false,"mediumzoom":false,"lazyload":false,"pangu":false,"comments":{"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},"algolia":{"hits":{"per_page":10},"labels":{"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}},"localsearch":{"enable":false,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},"motion":{"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}};
+  </script>
+
+  <meta name="description" content="java堆区划分堆区的划分：年轻代1&#x2F;3（eden,s0,s1)→老年代2&#x2F;3生命周期：年轻代eden内存不够时发生minor gc，对象年龄加1，eden区的会到s区，s区内存不足发生minor gc，超过设置的年龄的对象-》老年代-》full gc是不是所有的对象都分配在堆内存中-》逃逸分析，如果一个对象不离开方法就没有逃逸，这个对象就可以在虚拟机栈中存储 逃逸分析对象不一">
+<meta property="og:type" content="article">
+<meta property="og:title" content="java堆区部分详解">
+<meta property="og:url" content="http://example.com/2025/02/20/heap-detail/index.html">
+<meta property="og:site_name" content="feiwoscun 的博客">
+<meta property="og:description" content="java堆区划分堆区的划分：年轻代1&#x2F;3（eden,s0,s1)→老年代2&#x2F;3生命周期：年轻代eden内存不够时发生minor gc，对象年龄加1，eden区的会到s区，s区内存不足发生minor gc，超过设置的年龄的对象-》老年代-》full gc是不是所有的对象都分配在堆内存中-》逃逸分析，如果一个对象不离开方法就没有逃逸，这个对象就可以在虚拟机栈中存储 逃逸分析对象不一">
+<meta property="og:locale" content="en_US">
+<meta property="og:image" content="http://example.com/2025/02/20/heap-detail/heap.png">
+<meta property="og:image" content="http://example.com/2025/02/20/heap-detail/bjql.png">
+<meta property="og:image" content="http://example.com/2025/02/20/heap-detail/bjfz.png">
+<meta property="og:image" content="http://example.com/2025/02/20/heap-detail/bjzl.png">
+<meta property="article:published_time" content="2025-02-20T10:15:15.000Z">
+<meta property="article:modified_time" content="2025-02-20T10:50:12.349Z">
+<meta property="article:author" content="罗彬">
+<meta property="article:tag" content="java">
+<meta property="article:tag" content="堆区">
+<meta property="article:tag" content="jvm">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="http://example.com/2025/02/20/heap-detail/heap.png">
+
+<link rel="canonical" href="http://example.com/2025/02/20/heap-detail/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome : false,
+    isPost : true,
+    lang   : 'en'
+  };
+</script>
+
+  <title>java堆区部分详解 | feiwoscun 的博客</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="Toggle navigation bar">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+
+  <div class="site-meta">
+
+    <a href="/" class="brand" rel="start">
+      <span class="logo-line-before"><i></i></span>
+      <h1 class="site-title">feiwoscun 的博客</h1>
+      <span class="logo-line-after"><i></i></span>
+    </a>
+  </div>
+
+  <div class="site-nav-right">
+    <div class="toggle popup-trigger">
+    </div>
+  </div>
+</div>
+
+
+
+
+<nav class="site-nav">
+  <ul id="menu" class="main-menu menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-home fa-fw"></i>Home</a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-archive fa-fw"></i>Archives</a>
+
+  </li>
+  </ul>
+</nav>
+
+
+
+
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content post posts-expand">
+            
+
+    
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block" lang="en">
+    <link itemprop="mainEntityOfPage" href="http://example.com/2025/02/20/heap-detail/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="罗彬">
+      <meta itemprop="description" content="匪我思存，大一上古诗词鉴赏的时候突然听到的老师正在讲这句话的含义，当时又在给某个网站注册账号，所以就用它做网名一直到现在">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="feiwoscun 的博客">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          java堆区部分详解
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="far fa-calendar"></i>
+              </span>
+              <span class="post-meta-item-text">Posted on</span>
+              
+
+              <time title="Created: 2025-02-20 18:15:15 / Modified: 18:50:12" itemprop="dateCreated datePublished" datetime="2025-02-20T18:15:15+08:00">2025-02-20</time>
+            </span>
+
+          
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <h1 id="java堆区划分"><a href="#java堆区划分" class="headerlink" title="java堆区划分"></a>java堆区划分</h1><p>堆区的划分：年轻代1&#x2F;3（eden,s0,s1)→老年代2&#x2F;3<br>生命周期：年轻代eden内存不够时发生minor gc，对象年龄加1，eden区的会到s区，s区内存不足发生minor gc，超过设置的年龄的对象-》老年代-》full gc<br>是不是所有的对象都分配在堆内存中-》逃逸分析，如果一个对象不离开方法就没有逃逸，这个对象就可以在虚拟机栈中存储</p>
+<h3 id="逃逸分析"><a href="#逃逸分析" class="headerlink" title="逃逸分析"></a>逃逸分析</h3><p>对象不一定都存放在堆中<br>逃逸分析：判断一个对象有没有走出方法<br>站上分配：通过逃逸分析的对象可以在栈区空间开辟空间并创建，减少垃圾回收次数<br>标量替换：对不会进行逃逸的对象进行标量存储，把对象转换成局部变量<br>锁消除：满足逃逸分析的锁将会在被加载进内存的时候进行锁消除</p>
+<h3 id="堆区详解"><a href="#堆区详解" class="headerlink" title="堆区详解"></a>堆区详解</h3><p>堆区，所有线程共享，虚拟机栈的局部变量表，对象和数组的引用指向堆区分配的内存</p>
+<figure class="highlight c"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><span class="line">-Xms:堆区的起始内存</span><br><span class="line">-Xmx:堆区的最大内存</span><br></pre></td></tr></table></figure>
+<h3 id="堆区划分"><a href="#堆区划分" class="headerlink" title="堆区划分"></a>堆区划分</h3><p><img src="/2025/02/20/heap-detail/heap.png" alt="heap"><br>新生代：<br>新生代总的内存默认情况下占整个内存的1&#x2F;3</p>
+<ul>
+<li>eden（8&#x2F;10） eden用来年轻对象，同时还分拍了tlab区域，用来放置一些线程的私有区域。其目的是为了防止在多线程下并发创建对象可能会操作同一片内存区域的问题</li>
+<li>survival（2&#x2F;10）<br>老年代：（2&#x2F;3） 用来存放 大对象</li>
+</ul>
+<h3 id="java对象的三个部分："><a href="#java对象的三个部分：" class="headerlink" title="java对象的三个部分："></a>java对象的三个部分：</h3><p>（1）对象头对象头包括三个字段，第一个字段叫作Mark Word（标记字），用于存储自身运行时的数据，例如GC标志位、哈希码、锁状态等信息。第二个字段叫作Class Pointer（类对象指针），用于存放方法区Class对象的地址，虚拟机通过这个指针来确定这个对象是哪个类的实例。第三个字段叫作Array Length（数组长度）。如果对象是一个Java数组，那么此字段必须有，用于记录数组长度的数据；如果对象不是一个Java数组，那么此字段不存在，所以这是一个可选字段。<br>（2）对象体对象体包含对象的实例变量（成员变量），用于成员属性值，包括父类的成员属性值。这部分内存按4字节对齐。<br>（3）对齐字节对齐字节也叫作填充对齐，其作用是用来保证Java对象所占内存字节数为8的倍数</p>
+<h2 id="GC"><a href="#GC" class="headerlink" title="GC"></a>GC</h2><p><strong>引用计数法：</strong><br>为一个对象保存一个引用计数器，当引用计数器归零的时候就可以进行垃圾回收了，优点是实现简单，java没有使用这个，但是其他语言有在使用<br><strong>引用计数的缺点？</strong><br>比如有对象A和对象B，对象A中含有对象B的引用，对象B中又含有对象A的引用。此时对象A和对象B的引用计数器都不为0，但是系统中却不存在任何第3个对象引用了对象A或对象B。也就是说对象A和对象B是应该被回收的垃圾对象，但由于垃圾对象之间互相引用，从而使垃圾回收器无法识别，引起内存泄漏</p>
+<p><strong>可达性分析</strong><br>：以GC Root（根对象）（为起始点，按照从上至下的方式搜索被根对象集合所连接的目标对象是否可达，可达性分析的准确性要求stw（stop the world），或者用图论的话来说就是从GC Roots到这个对象不可达时，则证明此对象是不可能再被使用<br>根节点：</p>
+<ul>
+<li>在虚拟机栈（栈帧中的本地变量表）中引用的对象，譬如各个线程被调用的方法堆栈中使用到的参数、局部变量、临时变量等。</li>
+<li>在方法区中类静态属性引用的对象，譬如Java类的引用类型静态变量。·在方法区中常量引用的对象，譬如字符串常量池(String Table)里的引用。</li>
+<li>在本地方法栈中JNI（即通常所说的Native方法）引用的对象。</li>
+</ul>
+<h3 id="垃圾收集算法分类"><a href="#垃圾收集算法分类" class="headerlink" title="垃圾收集算法分类"></a>垃圾收集算法分类</h3><p><a target="_blank" rel="noopener" href="https://tech.meituan.com/2020/11/12/java-9-cms-gc.html">https://tech.meituan.com/2020/11/12/java-9-cms-gc.html</a></p>
+<p><strong>标记清理</strong><br>标记：垃圾收集器从引用根节点开始遍历，标记所有被引用的对象。清除：垃圾收集器对堆内存从头到尾进行线性遍历，如果发现某个对象为不可达对象，则将其回收。</p>
+<p><img src="/2025/02/20/heap-detail/bjql.png" alt="标记清理"><br>这种方式清理出来的空闲内存是不连续的，会产生内存碎片，而且该算法清除对象并不是真的置空，而是把需要清除的对象地址保存在空闲的地址列表里</p>
+<p><strong>标记复制</strong><br>核心思想是将活着的内存空间分为两块，每次只使用其中一块，在垃圾回收时将正在使用的内存中的存活对象复制到未被使用的内存块中，之后清除正在使用的内存块中的所有对象。两块内存交替使用，从而完成垃圾对象的回收</p>
+<p><img src="/2025/02/20/heap-detail/bjfz.png" alt="标记复制"><br>内存从一块空间复制到另一块空间可以保证空间的连续性，不会出现内存碎片问题。但是复制算法需要双倍内存空间，而且需要移动对象，这就涉及修改对象引用地址值的问题</p>
+<p><strong>标记整理</strong><br><img src="/2025/02/20/heap-detail/bjzl.png" alt="标记整理"></p>
+<p>标记–压缩算法中标记的存活对象将会被整理，按照内存地址依次排列，而未被标记的内存会被清理。如此一来，当我们需要给新对象分配内存时，JVM只需要持有一个可用内存的起始地址即可，这比维护一个空闲地址列表显然少了许多开销</p>
+<p><strong>：方法区的GC</strong></p>
+<ul>
+<li>回收常量，通过计算后引用计数为0的常量将会被回收</li>
+<li>类型回收：该类的所有实例被回收吗，该类的类加载器被回收，它对应的java.lang.Class没有地方在使用，也就是说没有地方在通过反射获取到它。（内存马卸载一直卸载不干净有可能是反射实例有关）</li>
+</ul>
+<h3 id="GC-1"><a href="#GC-1" class="headerlink" title="GC"></a>GC</h3><p>**(1)新生代GC(Minor GC &#x2F; Young GC)：**只是新生代（Eden、S0和S1区）的垃圾收集</p>
+<p>年轻代gc会停止世界，会引发STW(Stop-The-World)，会暂停用户线程。<strong>新生代使用复制算法（eden→from||to,from↔to）——因为快</strong>，新生代的对象大概率存的不不久，gc频繁，使用<strong>清除算法会导致内存碎片，整理算法太浪费时间</strong>，所以使用复制算法这种空间换时间的清除算法。<strong>并且复制算法的内存是规整的，就可以使用指针碰撞来分配内存，不用维护空闲列表</strong>，所以也很快。</p>
+<p>**(2)老年代GC(Major GC &#x2F; Old GC)：**只是老年代的垃圾收集。目前，只有CMS GC会有单独收集老年代的行为。很多时候Major GC会和Full GC混淆使用，,需要具体分辨是老年代回收还是整堆回收。老年代使用的是清除和整理算法混合使用，当产生内存碎片比较严重的时候，就会进行标记整理</p>
+<p>**(3)混合GC(Mixed GC)：**收集整个新生代以及部分老年代的垃圾收集。目前，只有G1 GC会有这种行为。</p>
+<p>**整堆GC(Full GC)：**则指的是整个Java堆和方法区的垃圾收集a</p>
+<h3 id="调优"><a href="#调优" class="headerlink" title="调优"></a>调优</h3><p>参考博客：<a target="_blank" rel="noopener" href="https://www.altitude.xin/blog/home/#/chapter/3ed1237c7761585683d00cdb5c2d7eef">https://www.altitude.xin/blog/home/#/chapter/3ed1237c7761585683d00cdb5c2d7eef</a></p>
+<p>总结一下：</p>
+<p>java的垃圾回收在年轻代和老年代各有不同，年轻代是minor GC或者young GC，会触发stw机制，他们的回收速度很快。老年代是使用full GC和major GC，其中full GC</p>
+<p>是对整个堆进行的收集，也会触发Stw</p>
+<h3 id="垃圾回收过程（吟唱）"><a href="#垃圾回收过程（吟唱）" class="headerlink" title="垃圾回收过程（吟唱）"></a>垃圾回收过程（吟唱）</h3><p>创建的对象会存放在eden区域，当eden区域放满了之后，进行垃圾回收（minor GC 或者 young GC），垃圾没有被回收的会被放到survival区，使用标记复制在survival0和survival1之间来回复制（每复制一次年龄计数器加一）。但是如果有对象内存特别大，大到整个survival的一半或更多，会被直接挪到老年代，最后年龄超过（默认15）岁之后，会被挪到老年代，老年代满了会使用标记整理的gc手段（major GC，full GC）</p>
+<h3 id="频繁Full-Gc怎么解决"><a href="#频繁Full-Gc怎么解决" class="headerlink" title="频繁Full Gc怎么解决"></a>频繁Full Gc怎么解决</h3><p><strong>首先要明白，什么情况下会full gc？：</strong><br>堆内存不够，显示调用，达到预设条件：某些垃圾回收器（如CMS、G1等）会根据预设的条件（如堆内存使用量，垃圾对像占比等)自动触发垃圾回收。<br>以此分析就清楚了，频繁的full gc大致原因如下：</p>
+<ul>
+<li>堆区分配<ul>
+<li>堆区内存太小</li>
+<li>年轻代老年代比例不当，年轻代内存太小，会导致大量对象分配到老年代，年轻代内存过大，会导致老年代内存太小也会full gc</li>
+<li>对象转到老年代的年龄设置太小，导致很多对象容易到老年代</li>
+<li>元空间类信息加载过多，如果内存还分配的小，就会导致堆区内存不够用而fullgc，关于元空间，jdk8以后有用到堆空间</li>
+</ul>
+</li>
+<li>代码问题<ul>
+<li>内存泄漏：频繁创建（不会回收的）大对象；使用了threadlocal没有显示的清除里面缓存的数据</li>
+</ul>
+</li>
+</ul>
+
+    </div>
+
+    
+    
+    
+
+      <footer class="post-footer">
+          <div class="post-tags">
+              <a href="/tags/java/" rel="tag"># java</a>
+              <a href="/tags/%E5%A0%86%E5%8C%BA/" rel="tag"># 堆区</a>
+              <a href="/tags/jvm/" rel="tag"># jvm</a>
+          </div>
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2025/02/08/TimeTask/" rel="prev" title="使用java实现一个简单的定时任务执行器">
+      <i class="fa fa-chevron-left"></i> 使用java实现一个简单的定时任务执行器
+    </a></div>
+      <div class="post-nav-item"></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let { activeClass } = CONFIG.comments;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          Table of Contents
+        </li>
+        <li class="sidebar-nav-overview">
+          Overview
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-1"><a class="nav-link" href="#java%E5%A0%86%E5%8C%BA%E5%88%92%E5%88%86"><span class="nav-number">1.</span> <span class="nav-text">java堆区划分</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#%E9%80%83%E9%80%B8%E5%88%86%E6%9E%90"><span class="nav-number">1.0.1.</span> <span class="nav-text">逃逸分析</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#%E5%A0%86%E5%8C%BA%E8%AF%A6%E8%A7%A3"><span class="nav-number">1.0.2.</span> <span class="nav-text">堆区详解</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#%E5%A0%86%E5%8C%BA%E5%88%92%E5%88%86"><span class="nav-number">1.0.3.</span> <span class="nav-text">堆区划分</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#java%E5%AF%B9%E8%B1%A1%E7%9A%84%E4%B8%89%E4%B8%AA%E9%83%A8%E5%88%86%EF%BC%9A"><span class="nav-number">1.0.4.</span> <span class="nav-text">java对象的三个部分：</span></a></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#GC"><span class="nav-number">1.1.</span> <span class="nav-text">GC</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#%E5%9E%83%E5%9C%BE%E6%94%B6%E9%9B%86%E7%AE%97%E6%B3%95%E5%88%86%E7%B1%BB"><span class="nav-number">1.1.1.</span> <span class="nav-text">垃圾收集算法分类</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#GC-1"><span class="nav-number">1.1.2.</span> <span class="nav-text">GC</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#%E8%B0%83%E4%BC%98"><span class="nav-number">1.1.3.</span> <span class="nav-text">调优</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#%E5%9E%83%E5%9C%BE%E5%9B%9E%E6%94%B6%E8%BF%87%E7%A8%8B%EF%BC%88%E5%90%9F%E5%94%B1%EF%BC%89"><span class="nav-number">1.1.4.</span> <span class="nav-text">垃圾回收过程（吟唱）</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#%E9%A2%91%E7%B9%81Full-Gc%E6%80%8E%E4%B9%88%E8%A7%A3%E5%86%B3"><span class="nav-number">1.1.5.</span> <span class="nav-text">频繁Full Gc怎么解决</span></a></li></ol></li></ol></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+  <p class="site-author-name" itemprop="name">罗彬</p>
+  <div class="site-description" itemprop="description">匪我思存，大一上古诗词鉴赏的时候突然听到的老师正在讲这句话的含义，当时又在给某个网站注册账号，所以就用它做网名一直到现在</div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">2</span>
+          <span class="site-state-item-name">posts</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-tags">
+        <span class="site-state-item-count">5</span>
+        <span class="site-state-item-name">tags</span>
+      </div>
+  </nav>
+</div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+        
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2025</span>
+  <span class="with-love">
+    <i class="fa fa-heart"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">罗彬</span>
+</div>
+  <div class="powered-by">Powered by <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> & <a href="https://muse.theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Muse</a>
+  </div>
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+
+<script src="/js/utils.js"></script>
+
+<script src="/js/motion.js"></script>
+
+
+<script src="/js/schemes/muse.js"></script>
+
+
+<script src="/js/next-boot.js"></script>
+
+
+
+
+  
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  
+
+  
+
+</body>
+</html>
